@@ -1,10 +1,6 @@
 
-:root {
-  font-family: "Inter", "Segoe UI", Arial, sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+* {
+  box-sizing: border-box;
 }
 
 html {
@@ -13,11 +9,20 @@ html {
 }
 
 body {
+  margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  margin: 0;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  color: #172033;
 }
 
 #root {
+  width: 100%;
   min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
 }
