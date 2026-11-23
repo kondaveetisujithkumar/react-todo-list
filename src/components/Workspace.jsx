@@ -1,7 +1,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import "./Workspace.css";
+import "./workspace.css";
 
 function Workspace({ onBack }) {
   const [user, setUser] = useState(null);
