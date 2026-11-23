@@ -2,11 +2,75 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 
+import Auth from "./components/Auth";
+import Workspace from "./components/Workspace";
+import { supabase } from "./lib/supabaseClient";
+
+// Main application
 function App() {
-  // Task states
+  const [session, setSession] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Check whether a user is already logged in
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      const { data, error } = await supabase.auth.getSession();
+
+      if (mounted) {
+        if (error) {
+          console.error(error.message);
+        }
+
+        setSession(data?.session ?? null);
+        setCheckingSession(false);
+      }
+    }
+
+    checkSession();
+
+    // Listen for login and logout changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setCheckingSession(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Show loading while checking login
+  if (checkingSession) {
+    return <p>Checking login...</p>;
+  }
+
+  // Show login page if user is not logged in
+  if (!session) {
+    return <Auth />;
+  }
+
+  // Show dashboard after login
+  return <Dashboard user={session.user} />;
+}
+
+// Existing To-Do dashboard
+function Dashboard({ user }) {
+  const userId = user.id;
+
+  // Workspace navigation state
+  const [showWorkspaces, setShowWorkspaces] = useState(false);
+
+  // Task states - separate storage for each user
   const [tasks, setTasks] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("myTasks")) || [];
+      return JSON.parse(
+        localStorage.getItem(`myTasks_${userId}`)
+      ) || [];
     } catch {
       return [];
     }
@@ -15,26 +79,44 @@ function App() {
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState("all");
 
-  // Form states
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    blocker: ""
+  // User details form states
+  const [formData, setFormData] = useState(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem(`userDetails_${userId}`)
+      ) || {
+        name: user.user_metadata?.full_name || "",
+        phone: "",
+        email: user.email || "",
+        blocker: ""
+      };
+    } catch {
+      return {
+        name: user.user_metadata?.full_name || "",
+        phone: "",
+        email: user.email || "",
+        blocker: ""
+      };
+    }
   });
 
   const [savedDetails, setSavedDetails] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("userDetails"));
+      return JSON.parse(
+        localStorage.getItem(`userDetails_${userId}`)
+      );
     } catch {
       return null;
     }
   });
 
-  // Save tasks
+  // Save tasks for this logged-in user
   useEffect(() => {
-    localStorage.setItem("myTasks", JSON.stringify(tasks));
-  }, [tasks]);
+    localStorage.setItem(
+      `myTasks_${userId}`,
+      JSON.stringify(tasks)
+    );
+  }, [tasks, userId]);
 
   // Handle form input changes
   function handleFormChange(e) {
@@ -46,15 +128,17 @@ function App() {
     }));
   }
 
-  // Submit user details form
+  // Submit user details
   function handleFormSubmit(e) {
     e.preventDefault();
 
-    const details = {
-      ...formData
-    };
+    const details = { ...formData };
 
-    localStorage.setItem("userDetails", JSON.stringify(details));
+    localStorage.setItem(
+      `userDetails_${userId}`,
+      JSON.stringify(details)
+    );
+
     setSavedDetails(details);
 
     alert("Form submitted successfully!");
@@ -111,16 +195,72 @@ function App() {
 
   const pendingCount = tasks.length - completedCount;
 
+  // Logout
+  async function handleLogout() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      alert(error.message);
+    }
+  }
+
+  // Show workspace page
+  if (showWorkspaces) {
+    return (
+      <Workspace
+        onBack={() => setShowWorkspaces(false)}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <div className="container">
 
+        {/* HEADER */}
         <header className="header">
           <div>
             <h1>My Tasks</h1>
             <p>Stay organised. Get things done.</p>
+            <p>Logged in as: {user.email}</p>
           </div>
-          <div className="header-icon">✓</div>
+
+          <div style={{
+            display: "flex",
+            gap: "10px",
+            alignItems: "center",
+            flexWrap: "wrap"
+          }}>
+            <button
+              type="button"
+              onClick={() => setShowWorkspaces(true)}
+              style={{
+                padding: "10px 18px",
+                background: "#3563e9",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer"
+              }}
+            >
+              Workspaces
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                padding: "10px 18px",
+                background: "#dc3545",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer"
+              }}
+            >
+              Logout
+            </button>
+          </div>
         </header>
 
         {/* USER DETAILS FORM */}
@@ -128,8 +268,10 @@ function App() {
           <h2>User Details</h2>
           <p>Enter your details and mention any blockers.</p>
 
-          <form onSubmit={handleFormSubmit} className="details-form">
-
+          <form
+            onSubmit={handleFormSubmit}
+            className="details-form"
+          >
             <div className="form-group">
               <label htmlFor="name">Full Name</label>
               <input
@@ -181,7 +323,10 @@ function App() {
               />
             </div>
 
-            <button type="submit" className="submit-button">
+            <button
+              type="submit"
+              className="submit-button"
+            >
               Submit Details
             </button>
           </form>
@@ -189,10 +334,19 @@ function App() {
           {savedDetails && (
             <div className="saved-details">
               <h3>Submitted Details</h3>
-              <p><strong>Name:</strong> {savedDetails.name}</p>
-              <p><strong>Phone:</strong> {savedDetails.phone}</p>
-              <p><strong>Email:</strong> {savedDetails.email}</p>
-              <p><strong>Blocker:</strong> {savedDetails.blocker || "None"}</p>
+              <p>
+                <strong>Name:</strong> {savedDetails.name}
+              </p>
+              <p>
+                <strong>Phone:</strong> {savedDetails.phone}
+              </p>
+              <p>
+                <strong>Email:</strong> {savedDetails.email}
+              </p>
+              <p>
+                <strong>Blocker:</strong>{" "}
+                {savedDetails.blocker || "None"}
+              </p>
             </div>
           )}
         </section>
@@ -223,6 +377,7 @@ function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
+
           <button type="submit">+ Add Task</button>
         </form>
 
