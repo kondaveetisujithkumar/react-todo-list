@@ -14,8 +14,15 @@ function Workspace({ onBack }) {
   const [description, setDescription] = useState("");
   const [isPublic, setIsPublic] = useState(true);
 
+  const [selectedWorkspace, setSelectedWorkspace] = useState(null);
+  const [workspaceMembers, setWorkspaceMembers] = useState([]);
+  const [memberEmail, setMemberEmail] = useState("");
+
   const [loading, setLoading] = useState(true);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
+
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -34,7 +41,6 @@ function Workspace({ onBack }) {
 
       setUser(currentUser);
 
-      // Get workspaces where the current user is a member
       const { data: memberships, error: memberError } =
         await supabase
           .from("workspace_members")
@@ -67,7 +73,6 @@ function Workspace({ onBack }) {
 
       setMyWorkspaces(joined);
 
-      // Get public workspaces
       const { data: publicData, error: publicError } =
         await supabase
           .from("workspaces")
@@ -79,7 +84,6 @@ function Workspace({ onBack }) {
 
       setPublicWorkspaces(publicData || []);
 
-      // Get requests submitted by this user
       const { data: requestData, error: requestError } =
         await supabase
           .from("join_requests")
@@ -91,7 +95,6 @@ function Workspace({ onBack }) {
 
       setMyRequests(requestData || []);
 
-      // Get pending requests for workspaces this user administers
       const adminIds = (memberships || [])
         .filter((member) => member.role === "admin")
         .map((member) => member.workspace_id);
@@ -129,7 +132,7 @@ function Workspace({ onBack }) {
     setError("");
 
     try {
-      const { data, error: createError } = await supabase.rpc(
+      const { error: createError } = await supabase.rpc(
         "create_workspace",
         {
           p_name: name.trim(),
@@ -206,6 +209,64 @@ function Workspace({ onBack }) {
     }
   }
 
+  // Open a workspace and load its members
+  async function openWorkspace(workspace) {
+    setSelectedWorkspace(workspace);
+    setWorkspaceMembers([]);
+    setMemberEmail("");
+    setMessage("");
+    setError("");
+    setLoadingMembers(true);
+
+    const { data, error: membersError } = await supabase.rpc(
+      "get_workspace_members",
+      {
+        p_workspace_id: workspace.id,
+      }
+    );
+
+    if (membersError) {
+      setError(membersError.message);
+    } else {
+      setWorkspaceMembers(data || []);
+    }
+
+    setLoadingMembers(false);
+  }
+
+  // Admin adds an existing registered user
+  async function handleAddMember(e) {
+    e.preventDefault();
+
+    if (!selectedWorkspace || !memberEmail.trim()) return;
+
+    setAddingMember(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const { error: addError } = await supabase.rpc(
+        "add_workspace_member_by_email",
+        {
+          p_workspace_id: selectedWorkspace.id,
+          p_email: memberEmail.trim(),
+        }
+      );
+
+      if (addError) throw addError;
+
+      setMessage("Member added successfully!");
+      setMemberEmail("");
+
+      await openWorkspace(selectedWorkspace);
+      await loadWorkspaces();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAddingMember(false);
+    }
+  }
+
   function getRequestStatus(workspaceId) {
     return myRequests.find(
       (request) => request.workspace_id === workspaceId
@@ -216,6 +277,105 @@ function Workspace({ onBack }) {
     return <div className="workspace-page">Loading workspaces...</div>;
   }
 
+  // WORKSPACE MEMBER MANAGEMENT VIEW
+  if (selectedWorkspace) {
+    return (
+      <div className="workspace-page">
+        <div className="workspace-header">
+          <div>
+            <h1>{selectedWorkspace.name}</h1>
+            <p>
+              {selectedWorkspace.description ||
+                "Manage your workspace members."}
+            </p>
+          </div>
+
+          <button
+            className="workspace-back"
+            onClick={() => {
+              setSelectedWorkspace(null);
+              setMessage("");
+              setError("");
+            }}
+          >
+            Back to Workspaces
+          </button>
+        </div>
+
+        {message && <div className="workspace-success">{message}</div>}
+        {error && <div className="workspace-error">{error}</div>}
+
+        <section className="workspace-section">
+          <h2>Workspace Members</h2>
+
+          {selectedWorkspace.role === "admin" && (
+            <form onSubmit={handleAddMember} className="add-member-form">
+              <label>Add an existing registered user</label>
+
+              <div className="add-member-row">
+                <input
+                  type="email"
+                  value={memberEmail}
+                  onChange={(e) => setMemberEmail(e.target.value)}
+                  placeholder="Enter member's registered email"
+                  required
+                />
+
+                <button type="submit" disabled={addingMember}>
+                  {addingMember ? "Adding..." : "Add Member"}
+                </button>
+              </div>
+
+              <p className="workspace-hint">
+                The user must already have an account in this application.
+              </p>
+            </form>
+          )}
+
+          {loadingMembers ? (
+            <p>Loading members...</p>
+          ) : workspaceMembers.length === 0 ? (
+            <p>No members found.</p>
+          ) : (
+            <div className="member-list">
+              {workspaceMembers.map((member) => (
+                <article className="member-card" key={member.user_id}>
+                  <div className="member-avatar">
+                    {(member.full_name || member.email || "U")
+                      .charAt(0)
+                      .toUpperCase()}
+                  </div>
+
+                  <div className="member-details">
+                    <strong>{member.full_name || "Team Member"}</strong>
+                    <span>{member.email}</span>
+                  </div>
+
+                  <span
+                    className={`member-role ${
+                      member.role === "admin" ? "admin-role" : ""
+                    }`}
+                  >
+                    {member.role}
+                  </span>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="workspace-section">
+          <h2>Tasks</h2>
+          <p>
+            Member management is ready. Task creation and assignment will be
+            added in the next step.
+          </p>
+        </section>
+      </div>
+    );
+  }
+
+  // MAIN WORKSPACE VIEW
   return (
     <div className="workspace-page">
       <div className="workspace-header">
@@ -232,7 +392,6 @@ function Workspace({ onBack }) {
       {message && <div className="workspace-success">{message}</div>}
       {error && <div className="workspace-error">{error}</div>}
 
-      {/* CREATE WORKSPACE */}
       <section className="workspace-section">
         <h2>Create a Workspace</h2>
 
@@ -270,7 +429,6 @@ function Workspace({ onBack }) {
         </form>
       </section>
 
-      {/* MY WORKSPACES */}
       <section className="workspace-section">
         <h2>My Workspaces</h2>
 
@@ -282,19 +440,27 @@ function Workspace({ onBack }) {
               <article className="workspace-card" key={workspace.id}>
                 <h3>{workspace.name}</h3>
                 <p>{workspace.description || "No description provided."}</p>
+
                 <span className="workspace-role">
                   Your role: {workspace.role}
                 </span>
+
                 <span className="workspace-visibility">
                   {workspace.is_public ? "Public" : "Private"}
                 </span>
+
+                <button
+                  className="manage-workspace-button"
+                  onClick={() => openWorkspace(workspace)}
+                >
+                  Manage Workspace
+                </button>
               </article>
             ))}
           </div>
         )}
       </section>
 
-      {/* DISCOVER WORKSPACES */}
       <section className="workspace-section">
         <h2>Discover Workspaces</h2>
 
@@ -339,7 +505,6 @@ function Workspace({ onBack }) {
         )}
       </section>
 
-      {/* ADMIN REQUESTS */}
       <section className="workspace-section">
         <h2>Membership Requests</h2>
 
